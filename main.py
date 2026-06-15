@@ -26,18 +26,43 @@ from core.logger import logger
 from core.email_sender import send_email, build_signal_html_report
 
 
-def merge_fund_data(trend_df: pd.DataFrame, signal_df: pd.DataFrame) -> pd.DataFrame:
+def merge_fund_data(trend_df: pd.DataFrame, signal_df: pd.DataFrame,
+                    fund_info_df: pd.DataFrame = None) -> pd.DataFrame:
     """合并基金趋势分析和信号分析为一个表格
 
-    以 基金代码 为 key，趋势数据（一行一基金）left join 信号最新数据。
+    以 基金代码 为 key，趋势数据 left join 信号最新数据，再 left join 问财额外字段。
 
     Args:
-        trend_df: 基金趋势分析 DataFrame（含 基金代码, 基金名称, 现价, 涨跌, 趋势线, 信号等）
-        signal_df: 基金信号 DataFrame（含 基金代码, 均线信号, RSI信号, MACD信号等，多行/基金）
+        trend_df: 基金趋势分析 DataFrame
+        signal_df: 基金信号 DataFrame（多行/基金，取最新一行）
+        fund_info_df: 问财原始数据，用于补充投资类型/持仓概念/同花顺主题等字段
 
     Returns:
         pd.DataFrame: 合并后的单表
     """
+    # ---- 标准化 fund_info_df 的列名（去掉 @ 等特殊字符） ----
+    if fund_info_df is not None and not fund_info_df.empty:
+        wencai_extra = fund_info_df.copy()
+        if '基金代码' in wencai_extra.columns:
+            wencai_extra['基金代码'] = wencai_extra['基金代码'].astype(str).str.zfill(6).str[:6]
+        # 提取关键列：投资类型、重仓概念、同花顺主题
+        key_cols = ['基金代码']
+        col_rename = {}
+        for col in wencai_extra.columns:
+            if '投资类型' in col and '投资类型' not in col_rename.values():
+                col_rename[col] = '投资类型'
+                key_cols.append(col)
+            elif '十大重仓概念' in col or '重仓概念明细' in col:
+                clean = col.split('@')[-1] if '@' in col else col
+                col_rename[col] = clean
+                key_cols.append(col)
+            elif '同花顺主题' in col:
+                col_rename[col] = '同花顺主题'
+                key_cols.append(col)
+        wencai_extra = wencai_extra[[c for c in key_cols if c in wencai_extra.columns]]
+        wencai_extra = wencai_extra.rename(columns=col_rename)
+    else:
+        wencai_extra = None
     # ---- 处理信号数据：取每只基金最新一条 ----
     signal_latest = pd.DataFrame()
     if not signal_df.empty:
@@ -89,7 +114,25 @@ def merge_fund_data(trend_df: pd.DataFrame, signal_df: pd.DataFrame) -> pd.DataF
     else:
         combined = pd.DataFrame()
 
-    # ---- 列顺序优化：基金信息 → 趋势指标 → 信号 ----
+    # ---- 用问财数据补充：投资类型/十大重仓概念/同花顺主题 ----
+    if wencai_extra is not None:
+        if '基金代码' not in combined.columns:
+            combined['基金代码'] = None
+        combined['基金代码'] = combined['基金代码'].astype(str).str.zfill(6).str[:6]
+        # 只取 combined 中没有的列来 join（避免重复列冲突）
+        new_cols = [c for c in wencai_extra.columns if c not in combined.columns or c == '基金代码']
+        combined = combined.merge(
+            wencai_extra[new_cols], on='基金代码', how='left', suffixes=('', '_wencai')
+        )
+        # 合并后可能有 _wencai 重复列，清理掉
+        for col in combined.columns:
+            if col.endswith('_wencai'):
+                base = col[:-7]
+                if base in combined.columns:
+                    combined[base] = combined[base].fillna(combined[col])
+                    combined = combined.drop(columns=[col])
+
+    # ---- 列顺序优化 ----
     preferred_order = [
         '强度排名', '基金代码', '基金名称', '投资类型',
         '现价', '今日涨跌(%)', '5日涨跌(%)', '20日涨跌(%)',
@@ -99,11 +142,10 @@ def merge_fund_data(trend_df: pd.DataFrame, signal_df: pd.DataFrame) -> pd.DataF
         '均线信号', 'RSI', 'RSI信号',
         'cci值', 'cci信号', 'macd值', 'macd信号', '布林带信号',
     ]
-    # 动态插入持仓/概念列到投资类型后面
+    # 动态插入：投资类型后面的持仓概念/同花顺主题列
     extra_info_cols = [c for c in combined.columns
-                       if ('持仓' in c or '概念' in c or '主题' in c or '板块' in c)
+                       if ('十大重仓' in c or '重仓概念' in c or '同花顺主题' in c or '概念明细' in c)
                        and c not in preferred_order]
-    # 找到 '投资类型' 的位置，把 extra_info_cols 插在它后面
     if '投资类型' in preferred_order and extra_info_cols:
         insert_pos = preferred_order.index('投资类型') + 1
         for i, col in enumerate(extra_info_cols):
@@ -233,10 +275,10 @@ def main():
     # ---- 合并基金趋势 + 信号 → 一个 Sheet ----
     if not trend_df.empty or not signal_df.empty:
         logger.info(">>> 合并基金趋势与信号数据...")
-        combined_fund_df = merge_fund_data(trend_df, signal_df)
+        combined_fund_df = merge_fund_data(trend_df, signal_df, fund_info_df)
         if not combined_fund_df.empty:
             combined_fund_df.to_excel(excel_writer, sheet_name='基金综合分析', index=False)
-            logger.info(f"基金综合分析已写入 Excel ({len(combined_fund_df)} 条)")
+            logger.info(f"基金综合分析已写入 Excel ({len(combined_fund_df)} 条, {len(combined_fund_df.columns)} 列)")
         else:
             logger.warning("基金合并数据为空")
 
