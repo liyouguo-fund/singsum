@@ -163,42 +163,65 @@ def main():
         except Exception as e:
             logger.error(f"宽基指数分析失败: {e}")
 
-    # ---- 2. 场外基金 WMA 趋势分析 ----
+    # ---- 2. 统一获取基金列表 + 历史数据（一次请求，共享给趋势+信号分析） ----
     trend_df = pd.DataFrame()
-    trend_images_dir = ''
-    if not args.skip_trend:
-        logger.info(">>> 步骤 2/3: 场外基金趋势分析 (WMA)")
-        try:
-            from analysis.fund_trend_wma import run_fund_trend_analysis
-            trend_result = run_fund_trend_analysis()
-            trend_df = trend_result.get('dataframe', pd.DataFrame())
-            trend_images_dir = trend_result.get('images_dir', '')
-            if not trend_df.empty:
-                logger.info(f"基金趋势分析完成 ({len(trend_df)} 条)")
-            else:
-                logger.warning("基金趋势分析无数据")
-        except Exception as e:
-            logger.error(f"基金趋势分析失败: {e}")
-
-    # ---- 3. 基金技术信号分析 ----
     signal_df = pd.DataFrame()
     signal_csv = None
-    if not args.skip_signal:
-        logger.info(">>> 步骤 3/3: 基金技术信号分析")
-        try:
-            from analysis.fund_signal import run_fund_signal_analysis
-            signal_result = run_fund_signal_analysis(
-                days_to_keep=args.days,
-                wencai_query=args.wencai
-            )
-            signal_df = signal_result.get('dataframe', pd.DataFrame())
-            signal_csv = signal_result.get('csv_path')
-            if not signal_df.empty:
-                logger.info(f"基金信号分析完成 ({len(signal_df)} 条)")
-            else:
-                logger.warning("基金信号分析无数据")
-        except Exception as e:
-            logger.error(f"基金信号分析失败: {e}")
+    trend_images_dir = ''
+    prefetched_data = {}
+
+    if not args.skip_trend or not args.skip_signal:
+        logger.info(">>> 步骤 2/4: 获取基金列表...")
+        from core.fund_fetcher import get_funds_from_wencai, fetch_fund_histories_batch
+
+        # 获取基金列表（仅一次 pywencai 调用）
+        wencai_query = args.wencai or os.environ.get('WENCAI_QUERY')
+        fund_info_df = get_funds_from_wencai(wencai_query)
+        fund_codes = fund_info_df['基金代码'].tolist() if fund_info_df is not None else []
+
+        if fund_codes:
+            logger.info(f">>> 步骤 3/4: 批量获取 {len(fund_codes)} 只基金历史数据（仅一次 API 请求）...")
+            prefetched_data = fetch_fund_histories_batch(fund_codes, days=200)
+            logger.info(f"    获取成功: {len(prefetched_data)}/{len(fund_codes)} 只基金")
+
+            # ---- 2a. 场外基金趋势分析（使用预取数据） ----
+            if not args.skip_trend:
+                logger.info(">>> 步骤 4a: 场外基金趋势分析 (WMA) [使用共享数据]")
+                try:
+                    from analysis.fund_trend_wma import run_fund_trend_analysis
+                    trend_result = run_fund_trend_analysis(
+                        fund_codes=fund_codes,
+                        prefetched_data=prefetched_data,
+                    )
+                    trend_df = trend_result.get('dataframe', pd.DataFrame())
+                    trend_images_dir = trend_result.get('images_dir', '')
+                    if not trend_df.empty:
+                        logger.info(f"基金趋势分析完成 ({len(trend_df)} 条)")
+                    else:
+                        logger.warning("基金趋势分析无数据")
+                except Exception as e:
+                    logger.error(f"基金趋势分析失败: {e}")
+
+            # ---- 2b. 基金技术信号分析（使用同一份预取数据） ----
+            if not args.skip_signal:
+                logger.info(">>> 步骤 4b: 基金技术信号分析 [使用共享数据]")
+                try:
+                    from analysis.fund_signal import run_fund_signal_analysis
+                    signal_result = run_fund_signal_analysis(
+                        days_to_keep=args.days,
+                        fund_codes=fund_codes,
+                        prefetched_data=prefetched_data,
+                    )
+                    signal_df = signal_result.get('dataframe', pd.DataFrame())
+                    signal_csv = signal_result.get('csv_path')
+                    if not signal_df.empty:
+                        logger.info(f"基金信号分析完成 ({len(signal_df)} 条)")
+                    else:
+                        logger.warning("基金信号分析无数据")
+                except Exception as e:
+                    logger.error(f"基金信号分析失败: {e}")
+        else:
+            logger.error("未获取到基金列表，跳过基金分析")
 
     # ---- 合并基金趋势 + 信号 → 一个 Sheet ----
     if not trend_df.empty or not signal_df.empty:

@@ -130,3 +130,105 @@ def get_fund_codes(query=None):
         logger.info(f"获取到 {len(codes)} 个基金代码")
         return codes
     return []
+
+
+def fetch_single_fund_history(fund_code: str, days: int = 200):
+    """获取单只基金历史净值（使用 akshare）
+
+    Args:
+        fund_code: 6位基金代码
+        days: 回溯天数
+
+    Returns:
+        DataFrame: 标准化列 date, nav, daily_return, fund_code, fund_name
+        None: 获取失败
+    """
+    from datetime import datetime, timedelta
+
+    try:
+        import akshare as ak
+
+        code = str(fund_code).split('.')[0].zfill(6)
+
+        # 数据源1: fund_open_fund_info_em
+        try:
+            raw = ak.fund_open_fund_info_em(symbol=code, indicator='单位净值走势')
+            if raw is not None and not raw.empty:
+                df = raw.rename(columns={
+                    '净值日期': 'date', '单位净值': 'nav', '日增长率': 'daily_return'
+                })
+                df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d')
+                df['nav'] = pd.to_numeric(df['nav'], errors='coerce')
+                df['daily_return'] = pd.to_numeric(df['daily_return'], errors='coerce')
+                df['fund_code'] = code
+                df = df.dropna(subset=['nav']).reset_index(drop=True)
+
+                # 过滤日期
+                start = (datetime.now() - timedelta(days=days + 30)).strftime('%Y-%m-%d')
+                df = df[df['date'] >= start]
+                if not df.empty:
+                    return df[['date', 'nav', 'daily_return', 'fund_code']]
+        except Exception:
+            pass
+
+        # 数据源2: fund_open_fund_daily_em (当日全量)
+        try:
+            all_funds = ak.fund_open_fund_daily_em()
+            fund_row = all_funds[all_funds['基金代码'] == code]
+            if not fund_row.empty:
+                unit_cols = [c for c in all_funds.columns if '单位净值' in c]
+                if unit_cols:
+                    latest_date = unit_cols[0].split('-')[0]
+                    nav = float(fund_row.iloc[0][unit_cols[0]])
+                    growth = float(fund_row.iloc[0].get('日增长率', 0))
+                    df = pd.DataFrame([{
+                        'date': latest_date, 'nav': nav,
+                        'daily_return': growth, 'fund_code': code
+                    }])
+                    df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d')
+                    return df[['date', 'nav', 'daily_return', 'fund_code']]
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.debug(f"获取基金 {fund_code} 历史数据失败: {e}")
+
+    return None
+
+
+def fetch_fund_histories_batch(fund_codes: list, days: int = 200,
+                                progress_callback=None) -> dict:
+    """批量获取基金历史净值数据（一次 API 调用共享给所有分析模块）
+
+    Args:
+        fund_codes: 基金代码列表
+        days: 回溯天数
+        progress_callback: 进度回调 fn(current, total)
+
+    Returns:
+        dict: {fund_code: DataFrame(date, nav, daily_return, fund_code)}
+              获取失败的基金不在 dict 中
+    """
+    import time
+    import random
+
+    logger.info(f"开始批量获取 {len(fund_codes)} 只基金历史数据...")
+    result = {}
+    failed = 0
+
+    for i, code in enumerate(fund_codes):
+        if progress_callback:
+            progress_callback(i + 1, len(fund_codes))
+
+        df = fetch_single_fund_history(code, days)
+        if df is not None and not df.empty:
+            result[code] = df
+        else:
+            failed += 1
+
+        # 请求间隔防封 IP
+        if i < len(fund_codes) - 1:
+            time.sleep(random.uniform(0.8, 1.5))
+
+    logger.info(f"批量获取完成: 成功 {len(result)}/{len(fund_codes)}, 失败 {failed}")
+    return result

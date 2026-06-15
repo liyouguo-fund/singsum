@@ -49,14 +49,35 @@ def retry_api_call(func, max_retries=3, base_delay=1):
                 raise
 
 
-def get_fund_data(fund_code="000001"):
-    """获取基金历史净值数据，带重试机制"""
+def get_fund_data(fund_code="000001", prefetched_df=None):
+    """获取基金历史净值数据，带重试机制
+
+    Args:
+        fund_code: 基金代码
+        prefetched_df: 预取数据 (date, nav, daily_return, fund_code)，为 None 则自行调用 API
+    """
     try:
         logger.info(f"开始获取基金{fund_code}历史数据")
 
         # 处理基金代码，去掉.OF后缀
         if '.' in fund_code:
             fund_code = fund_code.split('.')[0]
+        code = str(fund_code).zfill(6).split('.')[0]
+
+        # ---- 使用预取数据 ----
+        if prefetched_df is not None and not prefetched_df.empty:
+            pdf = prefetched_df.copy()
+            history_df = pd.DataFrame({
+                '净值日期': pd.to_datetime(pdf['date'], errors='coerce'),
+                '最新净值': pd.to_numeric(pdf['nav'], errors='coerce'),
+                '日增长率%': pd.to_numeric(pdf.get('daily_return', 0), errors='coerce'),
+                '基金代码': code,
+                '基金简称': f'基金{code}',
+            })
+            history_df = history_df.dropna(subset=['最新净值']).reset_index(drop=True)
+            if not history_df.empty:
+                logger.info(f"基金{code}使用预取数据，共{len(history_df)}条记录")
+                return history_df
 
         # 尝试获取历史数据
         try:
@@ -258,21 +279,18 @@ def show_progress(current, total, start_time, prefix="分析进度"):
     sys.stdout.flush()
 
 
-def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None) -> dict:
+def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None,
+                             prefetched_data=None) -> dict:
     """运行基金技术信号分析（主入口）
 
     Args:
         days_to_keep: 保留数据天数
         fund_codes: 基金代码列表，None 则从问财获取
         wencai_query: 问财查询语句
+        prefetched_data: 预取的历史数据 {fund_code: DataFrame(date, nav, daily_return, fund_code)}
 
     Returns:
-        dict: {
-            'csv_path': CSV文件路径,
-            'excel_path': Excel文件路径,
-            'results': 分析结果列表,
-            'success': 是否成功
-        }
+        dict: {'csv_path', 'excel_path', 'dataframe', 'results', 'success'}
     """
     report_date = datetime.now().strftime('%Y-%m-%d')
 
@@ -318,8 +336,9 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
         show_progress(i, len(fund_codes), start_time, "分析进度")
 
         try:
-            # 获取数据
-            fund_df = get_fund_data(fund_code)
+            # 获取数据（优先使用预取数据）
+            pdf = prefetched_data.get(fund_code) if prefetched_data else None
+            fund_df = get_fund_data(fund_code, prefetched_df=pdf)
             if fund_df is None:
                 logger.warning(f"基金{fund_code}数据获取失败，跳过")
                 continue
