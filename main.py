@@ -63,11 +63,15 @@ def merge_fund_data(trend_df: pd.DataFrame, signal_df: pd.DataFrame) -> pd.DataF
         # 重命名趋势的"信号"列避免冲突
         if '信号' in trend.columns:
             trend = trend.rename(columns={'信号': '趋势信号'})
-        # 确保 基金代码 列名一致
-        if '基金代码' not in trend.columns and '基金代码' in trend.columns:
-            pass  # already correct
+        # 统一 基金代码 为字符串类型
+        if '基金代码' in trend.columns:
+            trend['基金代码'] = trend['基金代码'].astype(str).str.zfill(6).str[:6]
     else:
         trend = pd.DataFrame()
+
+    # ---- 统一 signal_latest 的 基金代码 类型 ----
+    if not signal_latest.empty and '基金代码' in signal_latest.columns:
+        signal_latest['基金代码'] = signal_latest['基金代码'].astype(str).str.zfill(6).str[:6]
 
     # ---- 合并 ----
     if not trend.empty and not signal_latest.empty:
