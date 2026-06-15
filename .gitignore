@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 输出文件
+output/
+logs/
+
+# IDE
+.vscode/
+.idea/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints/
+
+# 虚拟环境
+venv/
+env/
+.venv/
+
+# matplotlib
+~/.matplotlib/
+~/.cache/matplotlib/

@@ -1,0 +1,205 @@
+name: 每日基金分析综合报告
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # 北京时间 9:00
+
+  workflow_dispatch:
+    inputs:
+      days_to_keep:
+        description: '信号分析保留数据天数'
+        required: false
+        default: '10'
+      wencai_query:
+        description: '问财选股查询语句'
+        required: false
+        default: '场外基金近1年涨幅top200'
+
+jobs:
+  analyze-and-send:
+    name: 分析并发送综合报告
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出仓库代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: 缓存 pip 依赖
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: 安装 Python 依赖
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 安装中文字体
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-wqy-zenhei fonts-wqy-microhei
+          sudo fc-cache -fv
+          rm -rf ~/.cache/matplotlib ~/.matplotlib /home/runner/.cache/matplotlib /home/runner/.matplotlib
+          echo "=== 已安装的中文字体 ==="
+          fc-list :lang=zh | head -20
+
+      - name: 运行基金分析综合系统
+        id: run_analysis
+        env:
+          WENCAI_QUERY: ${{ secrets.WENCAI_QUERY || github.event.inputs.wencai_query || '场外基金近1年涨幅top200' }}
+        run: |
+          echo "开始运行基金分析综合系统..."
+          python main.py --days ${{ github.event.inputs.days_to_keep || 10 }} --wencai "$WENCAI_QUERY" --no-email
+          echo "分析完成"
+
+      - name: 列出生成的文件
+        run: |
+          echo "=== output 目录 ==="
+          ls -la output/ 2>/dev/null || echo "（无output目录）"
+          echo ""
+          echo "=== 趋势图目录 ==="
+          ls -d output/基金趋势图_* 2>/dev/null && ls output/基金趋势图_*/ 2>/dev/null | head -5 || echo "（无趋势图目录）"
+          echo ""
+          echo "=== logs 目录 ==="
+          ls -la logs/ 2>/dev/null || echo "（无logs目录）"
+
+      - name: 打包并创建 Release
+        id: create_release
+        run: |
+          TODAY=$(date +'%Y%m%d')
+          TAG_NAME="report-${TODAY}"
+          ZIP_NAME="基金分析报告_${TODAY}.zip"
+
+          IMAGES_DIR=$(ls -d output/基金趋势图_* 2>/dev/null | sort -r | head -1 || echo "")
+          UNIFIED_EXCEL=$(ls output/基金分析综合报告_*.xlsx 2>/dev/null | sort -r | head -1 || echo "")
+
+          FILES_TO_ZIP=""
+
+          if [ -n "$IMAGES_DIR" ]; then
+            FILES_TO_ZIP="$FILES_TO_ZIP $IMAGES_DIR"
+            echo "添加趋势图: $IMAGES_DIR"
+          fi
+
+          if [ -n "$UNIFIED_EXCEL" ]; then
+            FILES_TO_ZIP="$FILES_TO_ZIP $UNIFIED_EXCEL"
+            echo "添加综合报告: $UNIFIED_EXCEL"
+          fi
+
+          if [ -n "$FILES_TO_ZIP" ]; then
+            zip -r "$ZIP_NAME" $FILES_TO_ZIP
+            echo "已打包: $ZIP_NAME"
+
+            gh release delete "$TAG_NAME" --yes 2>/dev/null || true
+            git tag -d "$TAG_NAME" 2>/dev/null || true
+
+            gh release create "$TAG_NAME" \
+              --title "基金分析报告 ${TODAY}" \
+              --notes "基金分析综合报告 - ${TODAY}
+            包含：
+            - 宽基指数EMA趋势分析
+            - 基金综合分析（趋势+技术信号合并）" \
+              "$ZIP_NAME"
+
+            DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG_NAME}"
+            echo "DOWNLOAD_URL=${DOWNLOAD_URL}" >> $GITHUB_OUTPUT
+            echo "公开下载链接: ${DOWNLOAD_URL}"
+          else
+            echo "未找到可打包的文件，跳过 Release"
+            echo "DOWNLOAD_URL=" >> $GITHUB_OUTPUT
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: 上传日志和报告
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-output
+          path: |
+            logs/*.log
+            output/*.xlsx
+            output/*.csv
+            output/*.txt
+
+      - name: 发送邮件报告（仅Excel附件 + Release下载链接）
+        env:
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAIL_SMTP_SERVER: ${{ secrets.MAIL_SMTP_SERVER }}
+          MAIL_SMTP_PORT: ${{ secrets.MAIL_SMTP_PORT }}
+        run: |
+          DOWNLOAD_URL="${{ steps.create_release.outputs.DOWNLOAD_URL }}"
+          echo "Release 下载链接: ${DOWNLOAD_URL}"
+
+          python -c "
+          import sys, os, glob
+          sys.path.insert(0, '.')
+
+          from core.email_sender import send_email, build_signal_html_report
+          from core.logger import logger
+          from datetime import datetime
+
+          report_date = datetime.now().strftime('%Y-%m-%d')
+
+          # 读取宽基指数分析文本
+          index_text = ''
+          index_file = 'output/宽基指数分析结果.txt'
+          if os.path.exists(index_file):
+              with open(index_file, 'r', encoding='utf-8') as f:
+                  index_text = f.read()
+
+          # 查找信号明细 CSV
+          signal_csvs = sorted(glob.glob('output/信号明细_*.csv'), reverse=True)
+          signal_csv = signal_csvs[0] if signal_csvs else None
+
+          # 查找综合 Excel
+          excel_files = sorted(glob.glob('output/基金分析综合报告_*.xlsx'), reverse=True)
+          excel_file = excel_files[0] if excel_files else None
+
+          # 构建 HTML 正文
+          html_body = build_signal_html_report(signal_csv, index_text, report_date)
+
+          # 附件仅包含综合 Excel
+          attachments = [excel_file] if excel_file and os.path.exists(excel_file) else []
+
+          # 发送邮件（含 Release 下载链接）
+          download_url = '${DOWNLOAD_URL}' if '${DOWNLOAD_URL}' else None
+          success = send_email(
+              subject=f'【基金分析综合报告】{report_date}',
+              body_html=html_body,
+              attachment_paths=attachments,
+              download_url=download_url,
+          )
+
+          if success:
+              logger.info('邮件发送成功')
+          else:
+              logger.error('邮件发送失败')
+          "
+
+      - name: 发送失败通知
+        if: ${{ failure() }}
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SMTP_SERVER }}
+          server_port: ${{ secrets.MAIL_SMTP_PORT }}
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: ❌ 基金分析任务失败通知
+          body: |
+            基金分析综合任务执行失败，请检查 GitHub Actions 日志。
+            任务链接: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: ${{ secrets.MAIL_TO }}
+          from: ${{ secrets.MAIL_USERNAME }}
