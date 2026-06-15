@@ -49,12 +49,13 @@ def retry_api_call(func, max_retries=3, base_delay=1):
                 raise
 
 
-def get_fund_data(fund_code="000001", prefetched_df=None):
+def get_fund_data(fund_code="000001", prefetched_df=None, fund_name=None):
     """获取基金历史净值数据，带重试机制
 
     Args:
         fund_code: 基金代码
         prefetched_df: 预取数据 (date, nav, daily_return, fund_code)，为 None 则自行调用 API
+        fund_name: 基金真实名称（来自问财）
     """
     try:
         logger.info(f"开始获取基金{fund_code}历史数据")
@@ -67,12 +68,13 @@ def get_fund_data(fund_code="000001", prefetched_df=None):
         # ---- 使用预取数据 ----
         if prefetched_df is not None and not prefetched_df.empty:
             pdf = prefetched_df.copy()
+            name = fund_name or f'基金{code}'
             history_df = pd.DataFrame({
                 '净值日期': pd.to_datetime(pdf['date'], errors='coerce'),
                 '最新净值': pd.to_numeric(pdf['nav'], errors='coerce'),
                 '日增长率%': pd.to_numeric(pdf.get('daily_return', 0), errors='coerce'),
                 '基金代码': code,
-                '基金简称': f'基金{code}',
+                '基金简称': name,
             })
             history_df = history_df.dropna(subset=['最新净值']).reset_index(drop=True)
             if not history_df.empty:
@@ -280,7 +282,7 @@ def show_progress(current, total, start_time, prefix="分析进度"):
 
 
 def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None,
-                             prefetched_data=None) -> dict:
+                             prefetched_data=None, fund_name_map=None) -> dict:
     """运行基金技术信号分析（主入口）
 
     Args:
@@ -288,6 +290,7 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
         fund_codes: 基金代码列表，None 则从问财获取
         wencai_query: 问财查询语句
         prefetched_data: 预取的历史数据 {fund_code: DataFrame(date, nav, daily_return, fund_code)}
+        fund_name_map: 基金代码→名称映射 {fund_code: fund_name}
 
     Returns:
         dict: {'csv_path', 'excel_path', 'dataframe', 'results', 'success'}
@@ -336,9 +339,10 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
         show_progress(i, len(fund_codes), start_time, "分析进度")
 
         try:
-            # 获取数据（优先使用预取数据）
+            # 获取数据（优先使用预取数据 + 问财真实名称）
             pdf = prefetched_data.get(fund_code) if prefetched_data else None
-            fund_df = get_fund_data(fund_code, prefetched_df=pdf)
+            real_name = fund_name_map.get(fund_code) if fund_name_map else None
+            fund_df = get_fund_data(fund_code, prefetched_df=pdf, fund_name=real_name)
             if fund_df is None:
                 logger.warning(f"基金{fund_code}数据获取失败，跳过")
                 continue

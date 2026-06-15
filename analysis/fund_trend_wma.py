@@ -503,21 +503,17 @@ def results_to_dataframe(results: list) -> pd.DataFrame:
 
 
 def run_fund_trend_analysis(fund_codes: list = None,
-                            prefetched_data: dict = None) -> dict:
+                            prefetched_data: dict = None,
+                            fund_name_map: dict = None) -> dict:
     """运行场外基金WMA趋势分析（主入口）
 
     Args:
         fund_codes: 基金代码列表，None 则从问财获取
         prefetched_data: 预取的历史数据 {fund_code: DataFrame(date, nav, ...)}
-                        为 None 则每个基金自行调用 API 获取
+        fund_name_map: 基金代码→名称映射 {fund_code: fund_name}，来自问财真实名称
 
     Returns:
-        dict: {
-            'results': 分析结果列表,
-            'dataframe': DataFrame,
-            'excel_path': Excel文件路径,
-            'images_dir': 趋势图目录路径
-        }
+        dict: {'results', 'dataframe', 'excel_path', 'images_dir'}
     """
     logger.info("开始场外基金 WMA 趋势分析...")
 
@@ -545,9 +541,10 @@ def run_fund_trend_analysis(fund_codes: list = None,
     results = []
     for idx, code in enumerate(fund_codes, 1):
         try:
-            # 传入预取数据（如果有的话）
+            # 传入预取数据和真实名称
             pdf = prefetched_data.get(code) if prefetched_data else None
-            result = analyze_fund(code, prefetched_df=pdf)
+            real_name = fund_name_map.get(code) if fund_name_map else None
+            result = analyze_fund(code, fund_name=real_name, prefetched_df=pdf)
             results.append(result)
 
             if 'error' not in result:

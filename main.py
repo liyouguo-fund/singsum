@@ -179,6 +179,11 @@ def main():
         fund_info_df = get_funds_from_wencai(wencai_query)
         fund_codes = fund_info_df['基金代码'].tolist() if fund_info_df is not None else []
 
+        # 构建 基金代码 → 基金名称 映射（来自问财真实名称）
+        fund_name_map = {}
+        if fund_info_df is not None and '基金简称' in fund_info_df.columns:
+            fund_name_map = dict(zip(fund_info_df['基金代码'], fund_info_df['基金简称']))
+
         if fund_codes:
             logger.info(f">>> 步骤 3/4: 批量获取 {len(fund_codes)} 只基金历史数据（仅一次 API 请求）...")
             prefetched_data = fetch_fund_histories_batch(fund_codes, days=200)
@@ -192,6 +197,7 @@ def main():
                     trend_result = run_fund_trend_analysis(
                         fund_codes=fund_codes,
                         prefetched_data=prefetched_data,
+                        fund_name_map=fund_name_map,
                     )
                     trend_df = trend_result.get('dataframe', pd.DataFrame())
                     trend_images_dir = trend_result.get('images_dir', '')
@@ -211,6 +217,7 @@ def main():
                         days_to_keep=args.days,
                         fund_codes=fund_codes,
                         prefetched_data=prefetched_data,
+                        fund_name_map=fund_name_map,
                     )
                     signal_df = signal_result.get('dataframe', pd.DataFrame())
                     signal_csv = signal_result.get('csv_path')
