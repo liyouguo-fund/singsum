@@ -6,10 +6,10 @@
 - 偏离率: (现价 - 趋势线) / 趋势线 × 100%
 - 强度排序: 按偏离率数值排序，数值最大=1（最强）
 
-从 ff 项目迁移，重构为可调用函数接口。
+数据源：统一使用 akshare
 """
 
-import baostock as bs
+import akshare as ak
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
@@ -22,73 +22,142 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core.logger import logger
 
 
-# 默认分析指数列表
+# 默认分析指数列表（code 用于 akshare, prefix 区分指数/ETF）
+# 指数代码格式: 'sh000001' (无点), ETF代码格式: '510050' (纯数字)
 DEFAULT_INDICES = [
-    # A股主要指数
-    ('sh.000001', '上证指数'),
-    ('sz.399001', '深证成指'),
-    ('sz.399006', '创业板指'),
+    # A股主要指数（stock_zh_index_daily）
+    ('sh000001', '上证指数', 'index'),
+    ('sz399001', '深证成指', 'index'),
+    ('sz399006', '创业板指', 'index'),
 
-    # 宽基ETF
-    ('sh.510050', '上证50'),
-    ('sh.510300', '沪深300'),
-    ('sh.510500', '中证500'),
-    ('sh.512100', '中证1000'),
-    ('sh.563300', '国证2000'),
+    # 宽基ETF（fund_etf_hist_em）
+    ('510050', '上证50', 'etf'),
+    ('510300', '沪深300', 'etf'),
+    ('510500', '中证500', 'etf'),
+    ('512100', '中证1000', 'etf'),
+    ('563300', '国证2000', 'etf'),
 
     # 风格/策略ETF
-    ('sz.159949', '创业板50'),
-    ('sz.159967', '创成长'),
-    ('sh.588000', '科创50'),
-    ('sh.588220', '科创100'),
-    ('sh.512890', '红利低波'),
+    ('159949', '创业板50', 'etf'),
+    ('159967', '创成长', 'etf'),
+    ('588000', '科创50', 'etf'),
+    ('588220', '科创100', 'etf'),
+    ('512890', '红利低波', 'etf'),
 
     # 跨境ETF（QDII）
-    ('sz.159920', '恒生ETF'),
-    ('sh.513130', '恒生科技'),
-    ('sh.513100', '纳指'),
-    ('sh.513030', '德国'),
-    ('sh.513520', '日经'),
-    ('sh.513310', '中韩半导体'),
-    ('sz.164824', '印度基金'),
+    ('159920', '恒生ETF', 'etf'),
+    ('513130', '恒生科技', 'etf'),
+    ('513100', '纳指', 'etf'),
+    ('513030', '德国', 'etf'),
+    ('513520', '日经', 'etf'),
+    ('513310', '中韩半导体', 'etf'),
+    ('164824', '印度基金', 'etf'),
 
     # 商品ETF
-    ('sh.518880', '黄金'),
-    ('sz.161226', '白银'),
-    ('sz.159985', '豆粕'),
-    ('sz.162411', '华宝油气'),
+    ('518880', '黄金', 'etf'),
+    ('161226', '白银', 'etf'),
+    ('159985', '豆粕', 'etf'),
+    ('162411', '华宝油气', 'etf'),
 ]
 
 
-def get_stock_data(stock_code: str, days: int = 100, end_date: str = None) -> pd.DataFrame:
-    """获取股票/指数数据"""
-    bs.login()
+def get_stock_data(stock_code: str, code_type: str = 'etf', days: int = 100,
+                   end_date: str = None) -> pd.DataFrame:
+    """获取股票/指数/ETF 历史数据（统一使用 akshare，多数据源 fallback）
 
+    Args:
+        stock_code: 代码（指数如 'sh000001'，ETF如 '510050'）
+        code_type: 'index' 或 'etf'
+        days: 获取天数
+        end_date: 截止日期
+
+    Returns:
+        DataFrame: 标准化列名 date, open, high, low, close, volume
+    """
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
 
-    start_date = (datetime.strptime(end_date, '%Y-%m-%d') - timedelta(days=days)).strftime('%Y-%m-%d')
+    start_date = (datetime.strptime(end_date, '%Y-%m-%d') - timedelta(days=days + 30)).strftime('%Y-%m-%d')
 
-    rs = bs.query_history_k_data_plus(
-        stock_code,
-        'date,code,open,high,low,close,volume',
-        start_date=start_date,
-        end_date=end_date,
-        frequency='d'
-    )
+    df = None
+    errors = []
 
-    data_list = []
-    while (rs.error_code == '0') & rs.next():
-        data_list.append(rs.get_row_data())
+    # ---- 数据源1: stock_zh_index_daily（指数，也支持部分ETF） ----
+    try:
+        raw = ak.stock_zh_index_daily(symbol=stock_code)
+        if raw is not None and not raw.empty and 'close' in raw.columns:
+            df = raw.rename(columns={c: c.lower() for c in raw.columns})
+            # 确保有 open/high/low/close/volume/date
+            for col in ['date', 'open', 'high', 'low', 'close', 'volume']:
+                if col not in df.columns:
+                    df = None
+                    break
+            if df is not None:
+                logger.debug(f"stock_zh_index_daily 获取 {stock_code} 成功，{len(df)} 条")
+    except Exception as e:
+        errors.append(f'stock_zh_index_daily: {e}')
 
-    bs.logout()
+    # ---- 数据源2: fund_etf_hist_em（东方财富ETF） ----
+    if df is None:
+        try:
+            raw = ak.fund_etf_hist_em(
+                symbol=stock_code, period='daily',
+                start_date=start_date.replace('-', ''),
+                end_date=end_date.replace('-', ''),
+                adjust=''
+            )
+            if raw is not None and not raw.empty:
+                col_map = {'日期': 'date', '开盘价': 'open', '最高价': 'high',
+                           '最低价': 'low', '收盘价': 'close', '成交量': 'volume'}
+                df = raw.rename(columns={k: v for k, v in col_map.items() if k in raw.columns})
+                for col in ['date', 'open', 'high', 'low', 'close']:
+                    if col not in df.columns:
+                        df = None
+                        break
+                if df is not None:
+                    logger.debug(f"fund_etf_hist_em 获取 {stock_code} 成功，{len(df)} 条")
+        except Exception as e:
+            errors.append(f'fund_etf_hist_em: {e}')
 
-    df = pd.DataFrame(data_list, columns=rs.fields)
+    # ---- 数据源3: stock_zh_a_hist（A股历史，ETF也可用） ----
+    if df is None:
+        try:
+            raw = ak.stock_zh_a_hist(
+                symbol=stock_code, period='daily',
+                start_date=start_date.replace('-', ''),
+                end_date=end_date.replace('-', ''),
+                adjust=''
+            )
+            if raw is not None and not raw.empty:
+                col_map = {'日期': 'date', '开盘': 'open', '最高': 'high',
+                           '最低': 'low', '收盘': 'close', '成交量': 'volume'}
+                df = raw.rename(columns={k: v for k, v in col_map.items() if k in raw.columns})
+                for col in ['date', 'open', 'high', 'low', 'close']:
+                    if col not in df.columns:
+                        df = None
+                        break
+                if df is not None:
+                    logger.debug(f"stock_zh_a_hist 获取 {stock_code} 成功，{len(df)} 条")
+        except Exception as e:
+            errors.append(f'stock_zh_a_hist: {e}')
+
+    if df is None:
+        logger.warning(f"获取 {stock_code} 失败: {'; '.join(errors)}")
+        return pd.DataFrame()
+
+    # 标准化
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date'], errors='coerce').dt.strftime('%Y-%m-%d')
 
     for col in ['open', 'high', 'low', 'close', 'volume']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
+    # 过滤日期范围
+    if 'date' in df.columns:
+        df = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
+
+    df = df.dropna(subset=['close']).reset_index(drop=True)
     return df
 
 
@@ -107,10 +176,11 @@ def calculate_indicators_ema(df: pd.DataFrame, period: int = 20) -> pd.DataFrame
     return df
 
 
-def analyze_index(stock_code: str, period: int = 20) -> dict:
-    """分析单只指数/股票"""
+def analyze_index(stock_code: str, code_type: str = 'etf', period: int = 20) -> dict:
+    """分析单只指数/股票/ETF"""
     try:
-        df = get_stock_data(stock_code, days=period * 4)
+        # 需要足够数据支撑 90日涨跌计算（至少 ~130 个交易日 ≈ 180 日历天）
+        df = get_stock_data(stock_code, code_type=code_type, days=200)
         df = calculate_indicators_ema(df, period)
 
         latest = df.iloc[-1]
@@ -282,9 +352,10 @@ def run_index_analysis(output_file: str = None) -> dict:
     print('\n正在获取数据（EMA版本）...\n')
 
     results = []
-    for code, name in DEFAULT_INDICES:
+    for item in DEFAULT_INDICES:
+        code, name, code_type = item if len(item) == 3 else (item[0], item[1], 'etf')
         try:
-            result = analyze_index(code)
+            result = analyze_index(code, code_type=code_type)
             result['code'] = name
             results.append(result)
             print('OK ' + name)
