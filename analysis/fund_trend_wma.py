@@ -371,7 +371,9 @@ def get_deviation_color(dev):
         return '#006400'
 
 
-def plot_fund_trend(result: dict, save_path=None, buy2_dates=None, buy5_dates=None):
+def plot_fund_trend(result: dict, save_path=None,
+                   buy2_dates=None, buy5_dates=None,
+                   sell_stops=None, sell_profits=None, sell_exits=None):
     """绘制基金趋势分析图表"""
     if 'df' not in result:
         print("无数据可绘制")
@@ -428,6 +430,26 @@ def plot_fund_trend(result: dict, save_path=None, buy2_dates=None, buy5_dates=No
             ax1.scatter(b5d, b5p, marker='D', color='dodgerblue', s=140, zorder=20,
                        label='激进策略买入', edgecolors='darkblue', linewidths=1)
 
+    # 标记卖出信号
+    if sell_stops is not None and len(sell_stops) > 0:
+        sp = [df[df['date'] == d]['nav'].values[0] for d in sell_stops if d in df['date'].values]
+        sd = [d for d in sell_stops if d in df['date'].values]
+        if sd:
+            ax1.scatter(sd, sp, marker='v', color='red', s=140, zorder=20,
+                       label='止损', edgecolors='darkred', linewidths=1)
+    if sell_profits is not None and len(sell_profits) > 0:
+        pp = [df[df['date'] == d]['nav'].values[0] for d in sell_profits if d in df['date'].values]
+        pv = [d for d in sell_profits if d in df['date'].values]
+        if pv:
+            ax1.scatter(pv, pp, marker='v', color='darkorange', s=140, zorder=20,
+                       label='止盈', edgecolors='brown', linewidths=1)
+    if sell_exits is not None and len(sell_exits) > 0:
+        ep = [df[df['date'] == d]['nav'].values[0] for d in sell_exits if d in df['date'].values]
+        ed = [d for d in sell_exits if d in df['date'].values]
+        if ed:
+            ax1.scatter(ed, ep, marker='v', color='gray', s=100, zorder=20,
+                       label='趋势退出', edgecolors='dimgray', linewidths=1)
+
     ax1.set_ylim(y_low, y_high)
     ax1.set_ylabel('净值', fontsize=12)
     ax1.set_title('净值、趋势线、5日高低价与布林带 (WMA)', fontsize=12)
@@ -452,6 +474,15 @@ def plot_fund_trend(result: dict, save_path=None, buy2_dates=None, buy5_dates=No
                markersize=10, linewidth=0),
         Line2D([0], [0], marker='D', color='dodgerblue', label='激进策略买入',
                markerfacecolor='dodgerblue', markeredgecolor='darkblue',
+               markersize=8, linewidth=0),
+        Line2D([0], [0], marker='v', color='red', label='止损',
+               markerfacecolor='red', markeredgecolor='darkred',
+               markersize=10, linewidth=0),
+        Line2D([0], [0], marker='v', color='darkorange', label='止盈',
+               markerfacecolor='darkorange', markeredgecolor='brown',
+               markersize=10, linewidth=0),
+        Line2D([0], [0], marker='v', color='gray', label='趋势退出',
+               markerfacecolor='gray', markeredgecolor='dimgray',
                markersize=8, linewidth=0),
     ]
     ax1.legend(handles=legend_elements, loc='upper left', fontsize=8, ncol=2)
@@ -571,8 +602,8 @@ def run_fund_trend_analysis(fund_codes: list = None,
                 display_single_result(result, idx)
 
                 # 计算策略信号（用于图表标记）
-                buy2_dates = []
-                buy5_dates = []
+                buy2_dates, buy5_dates = [], []
+                sell_stops, sell_profits, sell_exits = [], [], []
                 try:
                     if 'df' in result:
                         from analysis.fund_signal import calculate_strategy_indicators
@@ -580,6 +611,9 @@ def run_fund_trend_analysis(fund_codes: list = None,
                         sdf = calculate_strategy_indicators(sdf)
                         buy2_dates = sdf[sdf['buy_signal_2'] == True]['date'].tolist()
                         buy5_dates = sdf[sdf['buy_signal_5'] == True]['date'].tolist()
+                        sell_stops = sdf[sdf['sell_stop_loss'] == True]['date'].tolist()
+                        sell_profits = sdf[sdf['sell_take_profit'] == True]['date'].tolist()
+                        sell_exits = sdf[sdf['sell_ma_bearish'] == True]['date'].tolist()
                 except Exception:
                     pass
 
@@ -589,7 +623,8 @@ def run_fund_trend_analysis(fund_codes: list = None,
                     for char in ['\\', '/', ':', '*', '?', '"', '<', '>', '|', '\t', '\n']:
                         clean_name = clean_name.replace(char, '_')
                     save_path = f'{images_dir}/{clean_name}_{result["code"]}.png'
-                    plot_fund_trend(result, save_path, buy2_dates, buy5_dates)
+                    plot_fund_trend(result, save_path, buy2_dates, buy5_dates,
+                                   sell_stops, sell_profits, sell_exits)
                 except Exception as e:
                     print(f"    绘图失败: {str(e)}")
             else:
