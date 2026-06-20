@@ -44,13 +44,15 @@ cd fund_analysis_system
 
 ### 2. 配置 GitHub Secrets
 
-在仓库页面：**Settings → Secrets and variables → Actions → New repository secret**
+在仓库或组织页面：**Settings → Secrets and variables → Actions → Secrets**
+
+> 组织级 Secrets 和仓库级 Secrets 使用方式完全相同（`${{ secrets.XXX }}`），组织级会自动继承到所有仓库。
 
 | Secret 名称 | 必填 | 说明 | 示例值 |
 |------------|------|------|--------|
-| `MAIL_USERNAME` | ✅ | 邮箱地址 | `123456789@qq.com` |
+| `MAIL_USERNAME` | ✅ | 邮箱地址 | `724429664@qq.com` |
 | `MAIL_PASSWORD` | ✅ | 邮箱SMTP授权码 | `xxxxxxxxxxxxxx` |
-| `MAIL_TO` | ✅ | 收件人邮箱地址 | `your-email@qq.com` |
+| `MAIL_TO` | ✅ | 收件人邮箱地址 | `724429664@qq.com` |
 | `MAIL_SMTP_SERVER` | ❌ | SMTP服务器地址 | `smtp.qq.com` |
 | `MAIL_SMTP_PORT` | ❌ | SMTP服务器端口 | `465` |
 | `WENCAI_QUERY` | ❌ | 问财查询语句 | `场外基金近1年涨幅top200` |
