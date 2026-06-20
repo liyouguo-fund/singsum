@@ -134,11 +134,11 @@ jobs:
 
       - name: 发送邮件报告（仅Excel附件 + Release下载链接）
         env:
-          SMTP_USER: ${{ secrets.MAIL_USERNAME }}
-          SMTP_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
-          RECIPIENTS: ${{ secrets.MAIL_TO }}
-          SMTP_SERVER: ${{ secrets.MAIL_SMTP_SERVER }}
-          SMTP_PORT: ${{ secrets.MAIL_SMTP_PORT }}
+          MAIL_USERNAME: ${{ secrets.MAIL_USERNAME }}
+          MAIL_PASSWORD: ${{ secrets.MAIL_PASSWORD }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          MAIL_SMTP_SERVER: ${{ secrets.MAIL_SMTP_SERVER }}
+          MAIL_SMTP_PORT: ${{ secrets.MAIL_SMTP_PORT }}
         run: |
           DOWNLOAD_URL="${{ steps.create_release.outputs.DOWNLOAD_URL }}"
           echo "Release 下载链接: ${DOWNLOAD_URL}"
