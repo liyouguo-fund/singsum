@@ -272,6 +272,30 @@ def main():
         else:
             logger.error("未获取到基金列表，跳过基金分析")
 
+    # ---- 2c. 买点2/买点5策略分析（使用同一份预取数据） ----
+    strategy_df = pd.DataFrame()
+    if not args.skip_signal and prefetched_data:
+        logger.info(">>> 步骤 4c: 买点2(稳健型) + 买点5(平衡型) 策略分析 [使用共享数据]")
+        try:
+            from analysis.fund_signal import run_strategy_analysis, strategy_results_to_dataframe
+
+            strategy_results = []
+            for code in fund_codes:
+                pdf = prefetched_data.get(code)
+                name = fund_name_map.get(code, f'基金{code}')
+                if pdf is not None and not pdf.empty:
+                    sr = run_strategy_analysis(code, name, pdf[['date', 'nav']])
+                    strategy_results.append(sr)
+
+            if strategy_results:
+                strategy_df = strategy_results_to_dataframe(strategy_results)
+                strategy_df.to_excel(excel_writer, sheet_name='买卖点策略', index=False)
+                logger.info(f"买卖点策略已写入 Excel ({len(strategy_df)} 条)")
+            else:
+                logger.warning("策略分析无数据")
+        except Exception as e:
+            logger.error(f"策略分析失败: {e}")
+
     # ---- 合并基金趋势 + 信号 → 一个 Sheet ----
     if not trend_df.empty or not signal_df.empty:
         logger.info(">>> 合并基金趋势与信号数据...")

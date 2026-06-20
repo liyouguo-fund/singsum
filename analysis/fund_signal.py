@@ -436,6 +436,248 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
     }
 
 
+# ════════════════════════════════════════════════════════════════════
+# 买点2(稳健型) + 买点5(平衡型) 策略
+# ════════════════════════════════════════════════════════════════════
+
+def calculate_strategy_indicators(df):
+    """计算买点2/买点5策略所需指标（复用信号分析的净值数据）
+
+    需要列: date, nav (来自 最新净值)
+    新增列:
+        trend_line_wma6, trend_line_wma10, deviation_s, ma10, ma20, ma30, ma60,
+        ma_bullish, ma_bearish, trend_slope_short, trend_slope_medium,
+        uptrend_strict, uptrend_early, uptrend, sideways, dev_cci,
+        buy_signal_2, buy_signal_5, sell_stop_loss, sell_take_profit, sell_ma_bearish
+    """
+    df = df.copy()
+    nav = df['nav'].values
+
+    # WMA6 趋势线（权重 6,5,4,3,2,1）
+    w6 = np.array([6, 5, 4, 3, 2, 1])
+    def _wma6(x):
+        n = len(x)
+        w = np.arange(n, 0, -1) if n < 6 else w6
+        return np.sum(w * x) / w.sum()
+    df['trend_line_wma6'] = df['nav'].rolling(6).apply(_wma6, raw=True)
+
+    # WMA10
+    w10 = np.arange(10, 0, -1)
+    def _wma10(x):
+        n = len(x)
+        w = np.arange(n, 0, -1) if n < 10 else w10
+        return np.sum(w * x) / w.sum()
+    df['trend_line_wma10'] = df['nav'].rolling(10).apply(_wma10, raw=True)
+
+    # 偏离率（基于 WMA6）
+    df['deviation_s'] = (df['nav'] - df['trend_line_wma6']) / df['trend_line_wma6'] * 100
+
+    # 均线
+    df['ma10'] = nav_series = df['nav'].rolling(10).mean()
+    df['ma20'] = df['nav'].rolling(20).mean()
+    df['ma30'] = df['nav'].rolling(30).mean()
+    df['ma60'] = df['nav'].rolling(60).mean()
+
+    # 多/空头
+    df['ma_bullish'] = (df['ma10'] > df['ma20']) & (df['ma20'] > df['ma30']) & (df['ma30'] > df['ma60'])
+    df['ma_bearish'] = (df['ma10'] < df['ma20']) & (df['ma20'] < df['ma30']) & (df['ma30'] < df['ma60'])
+
+    # 斜率
+    df['trend_slope_short'] = df['ma10'].diff(5)
+    df['trend_slope_medium'] = df['ma20'].diff(10)
+
+    # 上升趋势
+    df['uptrend_strict'] = (df['ma20'] > df['ma60']) & (df['trend_slope_medium'] > 0)
+    df['uptrend_early'] = (df['ma10'] > df['ma20']) & (df['trend_slope_short'] > 0)
+    df['uptrend'] = df['uptrend_strict'] | df['uptrend_early']
+
+    # 震荡市场（买点5 需要）
+    ma_range = (df['ma10'] - df['ma60']).abs() / df['ma60'].abs()
+    df['ma_converged'] = ma_range < 0.08
+    df['slope_unstable'] = df['trend_slope_short'].abs() < df['nav'].rolling(20).std() * 0.15
+    df['dev_volatility_low'] = df['deviation_s'].rolling(20).std() < 5
+    df['sideways'] = df['ma_converged'] & df['slope_unstable'] & df['dev_volatility_low']
+
+    # CCI（偏离率版）
+    sma_dev = df['deviation_s'].rolling(20).mean()
+    mad_dev = df['deviation_s'].rolling(20).apply(lambda x: np.abs(x - x.mean()).mean())
+    df['dev_cci'] = (df['deviation_s'] - sma_dev) / (0.015 * mad_dev)
+
+    # 偏离率前一日
+    dev_prev = df['deviation_s'].shift(1)
+
+    # ── 买点2(稳健型)：均线多头 + 偏离率上穿5% + 上升趋势 ──
+    df['buy_signal_2'] = (
+        df['ma_bullish'] &
+        (df['deviation_s'] > 5) & (dev_prev <= 5) &
+        df['uptrend']
+    )
+
+    # ── 买点5(平衡型)：均线多头 + 偏离率金叉4% + 偏离率上升 + CCI>-50 ──
+    df['buy_signal_5_uptrend'] = (
+        df['ma_bullish'] & df['uptrend'] &
+        (df['deviation_s'] > 4) & (dev_prev <= 4) &
+        (df['deviation_s'] > dev_prev) & (df['dev_cci'] > -50)
+    )
+    df['buy_signal_5_sideways'] = (
+        df['sideways'] &
+        (df['deviation_s'] > 5) & (dev_prev <= 5) &
+        (df['deviation_s'] > dev_prev) & (df['dev_cci'] > 0)
+    )
+    df['buy_signal_5'] = df['buy_signal_5_uptrend'] | df['buy_signal_5_sideways']
+
+    # 卖出条件（两策略共用）
+    df['sell_stop_loss'] = df['deviation_s'] < -5
+    df['sell_take_profit'] = df['deviation_s'] > 10
+    df['sell_ma_bearish'] = df['ma10'] < df['ma20']
+
+    return df
+
+
+def backtest_strategy(df, signal_col='buy_signal_2', max_hold=120):
+    """回测策略
+
+    Args:
+        df: 含 buy/sell 信号的 DataFrame
+        signal_col: 'buy_signal_2' 或 'buy_signal_5'
+        max_hold: 最长持有天数
+
+    Returns:
+        list[dict]: 每笔交易 {buy_date, sell_date, buy_price, sell_price, return_pct, sell_reason, holding_days}
+    """
+    trades = []
+    buy_mask = df[signal_col] == True
+    if not buy_mask.any():
+        return trades
+
+    buy_indices = df[buy_mask].index.tolist()
+
+    for buy_idx in buy_indices:
+        buy_pos = df.index.get_loc(buy_idx)
+        buy_price = df.loc[buy_idx, 'nav']
+        buy_date = df.loc[buy_idx, 'date']
+
+        sell_price = None
+        sell_date = None
+        sell_reason = None
+        holding_days = 0
+
+        for i in range(buy_pos + 1, len(df)):
+            cur = df.iloc[i]
+            holding_days = i - buy_pos
+
+            if cur['sell_stop_loss']:
+                sell_price = cur['nav']; sell_date = cur['date']; sell_reason = '止损'; break
+            if cur['sell_take_profit']:
+                sell_price = cur['nav']; sell_date = cur['date']; sell_reason = '止盈'; break
+            if cur['sell_ma_bearish']:
+                sell_price = cur['nav']; sell_date = cur['date']; sell_reason = '趋势退出'; break
+            if holding_days >= max_hold:
+                sell_price = cur['nav']; sell_date = cur['date']; sell_reason = '到期退出'; break
+
+        if sell_price is None:
+            continue
+
+        trades.append({
+            'buy_date': buy_date, 'sell_date': sell_date,
+            'buy_price': buy_price, 'sell_price': sell_price,
+            'return_pct': (sell_price - buy_price) / buy_price * 100,
+            'sell_reason': sell_reason, 'holding_days': holding_days,
+        })
+    return trades
+
+
+def strategy_summary(trades):
+    """策略回测汇总统计"""
+    if not trades:
+        return {'total': 0, 'win_rate': 0, 'avg_return': 0, 'max_return': 0,
+                'min_return': 0, 'avg_hold': 0, 'stop_loss': 0, 'take_profit': 0,
+                'trend_exit': 0, 'expire': 0, 'wins': 0, 'losses': 0}
+
+    td = pd.DataFrame(trades)
+    wins = (td['return_pct'] > 0).sum()
+    return {
+        'total': len(td), 'wins': int(wins), 'losses': int(len(td) - wins),
+        'win_rate': wins / len(td) * 100,
+        'avg_return': td['return_pct'].mean(),
+        'max_return': td['return_pct'].max(),
+        'min_return': td['return_pct'].min(),
+        'avg_hold': td['holding_days'].mean(),
+        'stop_loss': int((td['sell_reason'] == '止损').sum()),
+        'take_profit': int((td['sell_reason'] == '止盈').sum()),
+        'trend_exit': int((td['sell_reason'] == '趋势退出').sum()),
+        'expire': int((td['sell_reason'] == '到期退出').sum()),
+    }
+
+
+def run_strategy_analysis(fund_code, fund_name, nav_df):
+    """对单只基金运行买点2+买点5策略分析
+
+    Args:
+        fund_code: 基金代码
+        fund_name: 基金名称
+        nav_df: 含 (date, nav) 列的 DataFrame
+
+    Returns:
+        dict: {
+            'fund_code', 'fund_name',
+            'latest_deviation_s', 'latest_ma_bullish', 'latest_uptrend',
+            'buy2_signal', 'buy5_signal',
+            'buy2_summary': {...}, 'buy5_summary': {...},
+        }
+    """
+    if nav_df is None or len(nav_df) < 60:
+        return {'fund_code': fund_code, 'fund_name': fund_name,
+                'error': '数据不足(需要至少60条)'}
+
+    df = calculate_strategy_indicators(nav_df[['date', 'nav']].copy())
+
+    latest = df.iloc[-1]
+
+    # 回测
+    trades2 = backtest_strategy(df, 'buy_signal_2')
+    trades5 = backtest_strategy(df, 'buy_signal_5')
+
+    return {
+        'fund_code': fund_code,
+        'fund_name': fund_name,
+        'latest_deviation_s': latest.get('deviation_s', 0),
+        'latest_ma_bullish': bool(latest.get('ma_bullish', False)),
+        'latest_uptrend': bool(latest.get('uptrend', False)),
+        'latest_dev_cci': latest.get('dev_cci', 0),
+        'buy2_signal': bool(latest.get('buy_signal_2', False)),
+        'buy5_signal': bool(latest.get('buy_signal_5', False)),
+        'buy2_summary': strategy_summary(trades2),
+        'buy5_summary': strategy_summary(trades5),
+    }
+
+
+def strategy_results_to_dataframe(results):
+    """将策略分析结果转为 DataFrame"""
+    rows = []
+    for r in results:
+        if 'error' in r:
+            continue
+        b2 = r.get('buy2_summary', {})
+        b5 = r.get('buy5_summary', {})
+        rows.append({
+            '基金代码': r['fund_code'],
+            '基金名称': r['fund_name'],
+            '偏离率(WMA6)': round(r.get('latest_deviation_s', 0), 2),
+            '均线多头': '是' if r.get('latest_ma_bullish') else '否',
+            '上升趋势': '是' if r.get('latest_uptrend') else '否',
+            '买点2信号': '★买入' if r.get('buy2_signal') else '—',
+            '买点5信号': '★买入' if r.get('buy5_signal') else '—',
+            '买点2_交易次数': b2.get('total', 0),
+            '买点2_胜率(%)': round(b2.get('win_rate', 0), 1),
+            '买点2_平均收益(%)': round(b2.get('avg_return', 0), 2),
+            '买点5_交易次数': b5.get('total', 0),
+            '买点5_胜率(%)': round(b5.get('win_rate', 0), 1),
+            '买点5_平均收益(%)': round(b5.get('avg_return', 0), 2),
+        })
+    return pd.DataFrame(rows)
+
+
 if __name__ == "__main__":
     import argparse
 
