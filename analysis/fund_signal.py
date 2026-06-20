@@ -360,8 +360,8 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
                 )
                 if not strat_df.empty:
                     latest_s = strat_df.iloc[-1]
-                    buy2 = bool(latest_s.get('buy_signal_2', False))
-                    buy5 = bool(latest_s.get('buy_signal_5', False))
+                    buy2 = bool(latest_s['buy_signal_2']) if latest_s['buy_signal_2'] and not pd.isna(latest_s['buy_signal_2']) else False
+                    buy5 = bool(latest_s['buy_signal_5']) if latest_s['buy_signal_5'] and not pd.isna(latest_s['buy_signal_5']) else False
                     # 卖出条件判断
                     if latest_s.get('sell_stop_loss', False):
                         sell_status = '止损'

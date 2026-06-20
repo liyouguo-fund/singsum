@@ -604,18 +604,20 @@ def run_fund_trend_analysis(fund_codes: list = None,
                 # 计算策略信号（用于图表标记）
                 buy2_dates, buy5_dates = [], []
                 sell_stops, sell_profits, sell_exits = [], [], []
-                try:
-                    if 'df' in result:
+                if 'df' in result and len(result['df']) >= 60:
+                    try:
                         from analysis.fund_signal import calculate_strategy_indicators
                         sdf = result['df'][['date', 'nav']].copy()
                         sdf = calculate_strategy_indicators(sdf)
-                        buy2_dates = sdf[sdf['buy_signal_2'] == True]['date'].tolist()
-                        buy5_dates = sdf[sdf['buy_signal_5'] == True]['date'].tolist()
-                        sell_stops = sdf[sdf['sell_stop_loss'] == True]['date'].tolist()
-                        sell_profits = sdf[sdf['sell_take_profit'] == True]['date'].tolist()
-                        sell_exits = sdf[sdf['sell_ma_bearish'] == True]['date'].tolist()
-                except Exception:
-                    pass
+                        buy2_dates = sdf[sdf['buy_signal_2']]['date'].tolist()
+                        buy5_dates = sdf[sdf['buy_signal_5']]['date'].tolist()
+                        sell_stops = sdf[sdf['sell_stop_loss']]['date'].tolist()
+                        sell_profits = sdf[sdf['sell_take_profit']]['date'].tolist()
+                        sell_exits = sdf[sdf['sell_ma_bearish']]['date'].tolist()
+                        if buy2_dates or buy5_dates:
+                            logger.info(f"  {code}: 稳健{buy2_dates[-1] if buy2_dates else 0}个 激进{buy5_dates[-1] if buy5_dates else 0}个信号")
+                    except Exception as e:
+                        logger.warning(f"  {code} 策略信号计算失败: {e}")
 
                 # 保存图表
                 try:
