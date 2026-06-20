@@ -63,9 +63,6 @@ try:
 except Exception:
     pass
 
-# 获取实际可用的中文字体
-_CHINESE_FONT = _chinese_fonts[0] if _chinese_fonts else 'SimHei'
-print(f"使用字体: {_CHINESE_FONT}")
 
 
 def get_fund_data(fund_code, start_date=None):
@@ -494,8 +491,7 @@ def plot_fund_trend(result: dict, save_path=None,
                markerfacecolor='gray', markeredgecolor='dimgray',
                markersize=8, linewidth=0),
     ]
-    ax1.legend(handles=legend_elements, loc='upper left', fontsize=6, ncol=3,
-              prop={'family': _CHINESE_FONT})
+    ax1.legend(handles=legend_elements, loc='upper left', fontsize=6, ncol=3)
 
     # 下半部分：偏离率
     ax2 = fig.add_subplot(gs[1], sharex=ax1)
@@ -505,7 +501,7 @@ def plot_fund_trend(result: dict, save_path=None,
     ax2.axhline(y=5, color='red', linestyle='--', alpha=0.5, label='强势线(+5%)')
     ax2.axhline(y=2, color='orange', linestyle='--', alpha=0.5, label='弱势线(+2%)')
     ax2.set_ylabel('偏离率 (%)', fontsize=12)
-    ax2.legend(loc='upper left', fontsize=8, prop={'family': _CHINESE_FONT})
+    ax2.legend(loc='upper left', fontsize=8)
     ax2.set_title('偏离率 (WMA)', fontsize=12)
     ax2.grid(True, alpha=0.3)
     ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
