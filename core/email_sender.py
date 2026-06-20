@@ -259,6 +259,28 @@ def build_signal_html_report(signal_csv_path, index_analysis_text=None, report_d
                 <li>持有：<span style="color: #f39c12;">{counts['持有']}个</span></li>
             </ul>
                     """)
+
+            # 买卖点策略信号
+            strategy_cols = []
+            if '稳健策略' in signal_df.columns:
+                strategy_cols.append(('稳健策略', '🟢 稳健策略(买点2)', '#27ae60'))
+            if '激进策略' in signal_df.columns:
+                strategy_cols.append(('激进策略', '🔵 激进策略(买点5)', '#2980b9'))
+            if '卖出信号' in signal_df.columns:
+                strategy_cols.append(('卖出信号', '🔴 卖出信号', '#e74c3c'))
+
+            if strategy_cols:
+                html_parts.append("""
+            <h3 style="color: #2c3e50;">🎯 买卖点策略信号</h3>
+                """)
+                for col_name, title, color in strategy_cols:
+                    vc = signal_df[col_name].value_counts().to_dict()
+                    items = ''.join([f'<li>{k}：<span style="color: {color};">{v}个</span></li>'
+                                    for k, v in sorted(vc.items(), key=lambda x: -x[1])])
+                    html_parts.append(f"""
+            <h4 style="color: {color};">{title}</h4>
+            <ul>{items}</ul>
+                    """)
         except Exception as e:
             logger.warning(f"构建信号统计 HTML 失败: {e}")
 
