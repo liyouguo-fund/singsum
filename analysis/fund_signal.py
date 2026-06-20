@@ -366,8 +366,8 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
 
             # 创建信号表格
             signal_df = create_signal_table(fund_df, fund_code, report_date)
-            signal_df['买点2信号'] = '买入' if buy2 else '—'
-            signal_df['买点5信号'] = '买入' if buy5 else '—'
+            signal_df['稳健策略'] = '买入' if buy2 else '—'
+            signal_df['激进策略'] = '买入' if buy5 else '—'
 
             # 过滤近N天数据
             if '净值日期' in signal_df.columns:
@@ -682,8 +682,8 @@ def strategy_results_to_dataframe(results):
             '偏离率(WMA6)': round(r.get('latest_deviation_s', 0), 2),
             '均线多头': '是' if r.get('latest_ma_bullish') else '否',
             '上升趋势': '是' if r.get('latest_uptrend') else '否',
-            '买点2信号': '★买入' if r.get('buy2_signal') else '—',
-            '买点5信号': '★买入' if r.get('buy5_signal') else '—',
+            '稳健策略': '★买入' if r.get('buy2_signal') else '—',
+            '激进策略': '★买入' if r.get('buy5_signal') else '—',
             '买点2_交易次数': b2.get('total', 0),
             '买点2_胜率(%)': round(b2.get('win_rate', 0), 1),
             '买点2_平均收益(%)': round(b2.get('avg_return', 0), 2),

@@ -78,7 +78,8 @@ def merge_fund_data(trend_df: pd.DataFrame, signal_df: pd.DataFrame,
         # 只保留核心信号列（避免和趋势列重名冲突）
         signal_cols = ['基金代码', '投资类型', '净值日期',
                        '均线信号', 'RSI', 'RSI信号',
-                       'cci值', 'cci信号', 'macd值', 'macd信号', '布林带信号']
+                       'cci值', 'cci信号', 'macd值', 'macd信号', '布林带信号',
+                       '稳健策略', '激进策略']
         signal_cols = [c for c in signal_cols if c in signal_latest.columns]
         signal_latest = signal_latest[signal_cols]
 
@@ -141,7 +142,7 @@ def merge_fund_data(trend_df: pd.DataFrame, signal_df: pd.DataFrame,
         '净值日期',
         '均线信号', 'RSI', 'RSI信号',
         'cci值', 'cci信号', 'macd值', 'macd信号', '布林带信号',
-        '买点2信号', '买点5信号',
+        '稳健策略', '激进策略',
     ]
     # 动态插入：投资类型后面的持仓概念/同花顺主题列
     extra_info_cols = [c for c in combined.columns
