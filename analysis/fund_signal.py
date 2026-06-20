@@ -350,8 +350,9 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
             # 计算技术指标
             fund_df = calculate_technical_indicators(fund_df)
 
-            # 计算买点2/买点5策略信号
+            # 计算买点2/买点5策略信号 + 卖出状态
             buy2, buy5 = False, False
+            sell_status = '—'
             try:
                 strat_df = calculate_strategy_indicators(
                     fund_df[['净值日期', '最新净值']].rename(
@@ -361,6 +362,15 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
                     latest_s = strat_df.iloc[-1]
                     buy2 = bool(latest_s.get('buy_signal_2', False))
                     buy5 = bool(latest_s.get('buy_signal_5', False))
+                    # 卖出条件判断
+                    if latest_s.get('sell_stop_loss', False):
+                        sell_status = '止损'
+                    elif latest_s.get('sell_take_profit', False):
+                        sell_status = '止盈'
+                    elif latest_s.get('sell_ma_bearish', False):
+                        sell_status = '趋势退出'
+                    elif buy2 or buy5:
+                        sell_status = '持有'
             except Exception:
                 pass
 
@@ -368,6 +378,7 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
             signal_df = create_signal_table(fund_df, fund_code, report_date)
             signal_df['稳健策略'] = '买入' if buy2 else '—'
             signal_df['激进策略'] = '买入' if buy5 else '—'
+            signal_df['卖出信号'] = sell_status
 
             # 过滤近N天数据
             if '净值日期' in signal_df.columns:
