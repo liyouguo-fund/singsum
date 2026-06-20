@@ -371,7 +371,7 @@ def get_deviation_color(dev):
         return '#006400'
 
 
-def plot_fund_trend(result: dict, save_path=None):
+def plot_fund_trend(result: dict, save_path=None, buy2_dates=None, buy5_dates=None):
     """绘制基金趋势分析图表"""
     if 'df' not in result:
         print("无数据可绘制")
@@ -414,6 +414,20 @@ def plot_fund_trend(result: dict, save_path=None):
     ax1.plot(df['date'], df['bb_lower'], label='布林带下轨', color='orange', linewidth=1.5, zorder=4)
     ax1.fill_between(df['date'], df['bb_lower'], df['bb_upper'], color='orange', alpha=0.1, zorder=2)
 
+    # 标记稳健策略/激进策略买入信号
+    if buy2_dates is not None and len(buy2_dates) > 0:
+        b2p = [df[df['date'] == d]['nav'].values[0] for d in buy2_dates if d in df['date'].values]
+        b2d = [d for d in buy2_dates if d in df['date'].values]
+        if b2d:
+            ax1.scatter(b2d, b2p, marker='^', color='limegreen', s=180, zorder=20,
+                       label='稳健策略买入', edgecolors='darkgreen', linewidths=1)
+    if buy5_dates is not None and len(buy5_dates) > 0:
+        b5p = [df[df['date'] == d]['nav'].values[0] for d in buy5_dates if d in df['date'].values]
+        b5d = [d for d in buy5_dates if d in df['date'].values]
+        if b5d:
+            ax1.scatter(b5d, b5p, marker='D', color='dodgerblue', s=140, zorder=20,
+                       label='激进策略买入', edgecolors='darkblue', linewidths=1)
+
     ax1.set_ylim(y_low, y_high)
     ax1.set_ylabel('净值', fontsize=12)
     ax1.set_title('净值、趋势线、5日高低价与布林带 (WMA)', fontsize=12)
@@ -433,6 +447,12 @@ def plot_fund_trend(result: dict, save_path=None):
         Line2D([0], [0], color='orange', linewidth=1.5, label='布林带上轨'),
         Line2D([0], [0], color='orange', linewidth=1, linestyle='--', label='布林带中轨'),
         Line2D([0], [0], color='orange', linewidth=1.5, label='布林带下轨'),
+        Line2D([0], [0], marker='^', color='limegreen', label='稳健策略买入',
+               markerfacecolor='limegreen', markeredgecolor='darkgreen',
+               markersize=10, linewidth=0),
+        Line2D([0], [0], marker='D', color='dodgerblue', label='激进策略买入',
+               markerfacecolor='dodgerblue', markeredgecolor='darkblue',
+               markersize=8, linewidth=0),
     ]
     ax1.legend(handles=legend_elements, loc='upper left', fontsize=8, ncol=2)
 
@@ -550,13 +570,26 @@ def run_fund_trend_analysis(fund_codes: list = None,
             if 'error' not in result:
                 display_single_result(result, idx)
 
+                # 计算策略信号（用于图表标记）
+                buy2_dates = []
+                buy5_dates = []
+                try:
+                    if 'df' in result:
+                        from analysis.fund_signal import calculate_strategy_indicators
+                        sdf = result['df'][['date', 'nav']].copy()
+                        sdf = calculate_strategy_indicators(sdf)
+                        buy2_dates = sdf[sdf['buy_signal_2'] == True]['date'].tolist()
+                        buy5_dates = sdf[sdf['buy_signal_5'] == True]['date'].tolist()
+                except Exception:
+                    pass
+
                 # 保存图表
                 try:
                     clean_name = result['name']
                     for char in ['\\', '/', ':', '*', '?', '"', '<', '>', '|', '\t', '\n']:
                         clean_name = clean_name.replace(char, '_')
                     save_path = f'{images_dir}/{clean_name}_{result["code"]}.png'
-                    plot_fund_trend(result, save_path)
+                    plot_fund_trend(result, save_path, buy2_dates, buy5_dates)
                 except Exception as e:
                     print(f"    绘图失败: {str(e)}")
             else:
