@@ -1,3 +1,4 @@
+baostock>=0.8.8
 xalpha>=0.11.0
 akshare>=1.18.5
 pandas>=2.2.0
