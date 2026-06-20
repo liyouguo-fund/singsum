@@ -54,11 +54,18 @@ plt.rcParams['font.sans-serif'] = _font_list
 plt.rcParams['axes.unicode_minus'] = False
 plt.rcParams['savefig.dpi'] = 150
 plt.rcParams['figure.dpi'] = 100
+# 强制使用能找到的第一个中文字体
+if _chinese_fonts:
+    plt.rcParams['font.family'] = 'sans-serif'
 
 try:
     fm._load_fontmanager(try_read_cache=False)
 except Exception:
     pass
+
+# 获取实际可用的中文字体
+_CHINESE_FONT = _chinese_fonts[0] if _chinese_fonts else 'SimHei'
+print(f"使用字体: {_CHINESE_FONT}")
 
 
 def get_fund_data(fund_code, start_date=None):
@@ -417,37 +424,39 @@ def plot_fund_trend(result: dict, save_path=None,
     ax1.fill_between(df['date'], df['bb_lower'], df['bb_upper'], color='orange', alpha=0.1, zorder=2)
 
     # 标记稳健策略/激进策略买入信号
-    if buy2_dates is not None and len(buy2_dates) > 0:
-        b2p = [df[df['date'] == d]['nav'].values[0] for d in buy2_dates if d in df['date'].values]
-        b2d = [d for d in buy2_dates if d in df['date'].values]
-        if b2d:
-            ax1.scatter(b2d, b2p, marker='^', color='limegreen', s=180, zorder=20,
+    df_dates_set = set(df['date'].values)
+    def _match(dates):
+        """匹配日期并返回 (datetime列表, price列表)"""
+        dd = [pd.Timestamp(d) for d in dates if pd.Timestamp(d) in df_dates_set]
+        pp = [df[df['date'] == d]['nav'].values[0] for d in dd] if dd else []
+        return dd, pp
+
+    if buy2_dates:
+        d2, p2 = _match(buy2_dates)
+        if d2:
+            ax1.scatter(d2, p2, marker='^', color='limegreen', s=180, zorder=20,
                        label='稳健策略买入', edgecolors='darkgreen', linewidths=1)
-    if buy5_dates is not None and len(buy5_dates) > 0:
-        b5p = [df[df['date'] == d]['nav'].values[0] for d in buy5_dates if d in df['date'].values]
-        b5d = [d for d in buy5_dates if d in df['date'].values]
-        if b5d:
-            ax1.scatter(b5d, b5p, marker='D', color='dodgerblue', s=140, zorder=20,
+    if buy5_dates:
+        d5, p5 = _match(buy5_dates)
+        if d5:
+            ax1.scatter(d5, p5, marker='D', color='dodgerblue', s=140, zorder=20,
                        label='激进策略买入', edgecolors='darkblue', linewidths=1)
 
     # 标记卖出信号
-    if sell_stops is not None and len(sell_stops) > 0:
-        sp = [df[df['date'] == d]['nav'].values[0] for d in sell_stops if d in df['date'].values]
-        sd = [d for d in sell_stops if d in df['date'].values]
-        if sd:
-            ax1.scatter(sd, sp, marker='v', color='red', s=140, zorder=20,
+    if sell_stops:
+        ds, ps = _match(sell_stops)
+        if ds:
+            ax1.scatter(ds, ps, marker='v', color='red', s=140, zorder=20,
                        label='止损', edgecolors='darkred', linewidths=1)
-    if sell_profits is not None and len(sell_profits) > 0:
-        pp = [df[df['date'] == d]['nav'].values[0] for d in sell_profits if d in df['date'].values]
-        pv = [d for d in sell_profits if d in df['date'].values]
-        if pv:
-            ax1.scatter(pv, pp, marker='v', color='darkorange', s=140, zorder=20,
+    if sell_profits:
+        dp, pp = _match(sell_profits)
+        if dp:
+            ax1.scatter(dp, pp, marker='v', color='darkorange', s=140, zorder=20,
                        label='止盈', edgecolors='brown', linewidths=1)
-    if sell_exits is not None and len(sell_exits) > 0:
-        ep = [df[df['date'] == d]['nav'].values[0] for d in sell_exits if d in df['date'].values]
-        ed = [d for d in sell_exits if d in df['date'].values]
-        if ed:
-            ax1.scatter(ed, ep, marker='v', color='gray', s=100, zorder=20,
+    if sell_exits:
+        de, pe = _match(sell_exits)
+        if de:
+            ax1.scatter(de, pe, marker='v', color='gray', s=100, zorder=20,
                        label='趋势退出', edgecolors='dimgray', linewidths=1)
 
     ax1.set_ylim(y_low, y_high)
@@ -485,7 +494,8 @@ def plot_fund_trend(result: dict, save_path=None,
                markerfacecolor='gray', markeredgecolor='dimgray',
                markersize=8, linewidth=0),
     ]
-    ax1.legend(handles=legend_elements, loc='upper left', fontsize=8, ncol=2)
+    ax1.legend(handles=legend_elements, loc='upper left', fontsize=6, ncol=3,
+              prop={'family': _CHINESE_FONT})
 
     # 下半部分：偏离率
     ax2 = fig.add_subplot(gs[1], sharex=ax1)
@@ -495,7 +505,7 @@ def plot_fund_trend(result: dict, save_path=None,
     ax2.axhline(y=5, color='red', linestyle='--', alpha=0.5, label='强势线(+5%)')
     ax2.axhline(y=2, color='orange', linestyle='--', alpha=0.5, label='弱势线(+2%)')
     ax2.set_ylabel('偏离率 (%)', fontsize=12)
-    ax2.legend(loc='upper left', fontsize=10)
+    ax2.legend(loc='upper left', fontsize=8, prop={'family': _CHINESE_FONT})
     ax2.set_title('偏离率 (WMA)', fontsize=12)
     ax2.grid(True, alpha=0.3)
     ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=1))
