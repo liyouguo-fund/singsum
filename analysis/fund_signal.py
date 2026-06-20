@@ -350,8 +350,24 @@ def run_fund_signal_analysis(days_to_keep=10, fund_codes=None, wencai_query=None
             # 计算技术指标
             fund_df = calculate_technical_indicators(fund_df)
 
+            # 计算买点2/买点5策略信号
+            buy2, buy5 = False, False
+            try:
+                strat_df = calculate_strategy_indicators(
+                    fund_df[['净值日期', '最新净值']].rename(
+                        columns={'净值日期': 'date', '最新净值': 'nav'})
+                )
+                if not strat_df.empty:
+                    latest_s = strat_df.iloc[-1]
+                    buy2 = bool(latest_s.get('buy_signal_2', False))
+                    buy5 = bool(latest_s.get('buy_signal_5', False))
+            except Exception:
+                pass
+
             # 创建信号表格
             signal_df = create_signal_table(fund_df, fund_code, report_date)
+            signal_df['买点2信号'] = '买入' if buy2 else '—'
+            signal_df['买点5信号'] = '买入' if buy5 else '—'
 
             # 过滤近N天数据
             if '净值日期' in signal_df.columns:
