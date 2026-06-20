@@ -83,7 +83,7 @@ def get_funds_from_wencai(query=None):
             fund_data['基金简称'] = '未知'
 
         # 查找投资类型列
-        invest_type_cols = [col for col in fund_data.columns if '投资类型' in col or '类型' in col]
+        invest_type_cols = [col for col in fund_data.columns if '投资类型(二级) ' in col or '类型' in col]
         if invest_type_cols:
             if invest_type_cols[0] != '投资类型':
                 fund_data.rename(columns={invest_type_cols[0]: '投资类型'}, inplace=True)
@@ -91,7 +91,7 @@ def get_funds_from_wencai(query=None):
             fund_data['投资类型'] = '未知类型'
 
         # 识别并保留"持仓"相关列（十大持仓、重仓持股等）
-        holding_cols = [col for col in fund_data.columns if '持仓' in col or '重仓' in col]
+        holding_cols = [col for col in fund_data.columns if '基金十大重仓概念 ' in col or '概念' in col]
         for col in holding_cols:
             clean_name = col.strip()
             if clean_name != col and clean_name not in fund_data.columns:
