@@ -64,6 +64,8 @@ def get_stock_data(stock_code: str, days: int = 200,
                    end_date: str = None) -> pd.DataFrame:
     """获取股票/指数/ETF 历史数据（使用 baostock）
 
+    注意：调用前需已执行 bs.login()，调用后不要单独 bs.logout()
+
     Args:
         stock_code: baostock 代码（如 'sh.000001', 'sh.510050'）
         days: 获取天数
@@ -72,8 +74,6 @@ def get_stock_data(stock_code: str, days: int = 200,
     Returns:
         DataFrame: 列 date, open, high, low, close, volume
     """
-    bs.login()
-
     if end_date is None:
         end_date = datetime.now().strftime('%Y-%m-%d')
 
@@ -90,8 +90,6 @@ def get_stock_data(stock_code: str, days: int = 200,
     data_list = []
     while (rs.error_code == '0') & rs.next():
         data_list.append(rs.get_row_data())
-
-    bs.logout()
 
     df = pd.DataFrame(data_list, columns=rs.fields)
 
@@ -267,6 +265,14 @@ def run_index_analysis(output_file: str = None) -> dict:
 
     print('\n正在获取数据（EMA版本，baostock）...\n')
 
+    # baostock 登录一次，所有指数共用
+    try:
+        bs.login()
+        logger.debug("baostock 登录成功")
+    except Exception as e:
+        logger.error(f"baostock 登录失败: {e}")
+        return {'text': '', 'dataframe': pd.DataFrame(), 'results': []}
+
     results = []
     for code, name in DEFAULT_INDICES:
         try:
@@ -277,6 +283,9 @@ def run_index_analysis(output_file: str = None) -> dict:
         except Exception as e:
             print('FAIL ' + name + ': ' + str(e))
             logger.warning(f"指数 {name} 分析失败: {e}")
+
+    bs.logout()
+    logger.debug("baostock 登出")
 
     text = ''
     df = pd.DataFrame()
