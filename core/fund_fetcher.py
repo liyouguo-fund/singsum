@@ -30,7 +30,7 @@ def get_funds_from_wencai(query=None):
     if query is None:
         query = os.environ.get('WENCAI_QUERY')
     if not query:
-        query = '场外基金近1年涨幅top5，投资类型，概念'
+        query = '近一年涨幅前5名，C类基金，投资类型，概念'
 
     logger.info(f"使用问财选股获取基金列表，查询条件：{query}")
 
