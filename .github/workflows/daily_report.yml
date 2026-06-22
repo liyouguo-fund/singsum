@@ -84,6 +84,8 @@ jobs:
 
           IMAGES_DIR=$(ls -d output/基金趋势图_* 2>/dev/null | sort -r | head -1 || echo "")
           UNIFIED_EXCEL=$(ls output/基金分析综合报告_*.xlsx 2>/dev/null | sort -r | head -1 || echo "")
+          SIGNAL_CSV=$(ls output/信号明细_*.csv 2>/dev/null | sort -r | head -1 || echo "")
+          SIGNAL_EXCEL=$(ls output/信号明细_*.xlsx 2>/dev/null | sort -r | head -1 || echo "")
 
           FILES_TO_ZIP=""
 
@@ -95,6 +97,16 @@ jobs:
           if [ -n "$UNIFIED_EXCEL" ]; then
             FILES_TO_ZIP="$FILES_TO_ZIP $UNIFIED_EXCEL"
             echo "添加综合报告: $UNIFIED_EXCEL"
+          fi
+
+          if [ -n "$SIGNAL_CSV" ]; then
+            FILES_TO_ZIP="$FILES_TO_ZIP $SIGNAL_CSV"
+            echo "添加信号明细CSV: $SIGNAL_CSV"
+          fi
+
+          if [ -n "$SIGNAL_EXCEL" ]; then
+            FILES_TO_ZIP="$FILES_TO_ZIP $SIGNAL_EXCEL"
+            echo "添加信号明细Excel: $SIGNAL_EXCEL"
           fi
 
           if [ -n "$FILES_TO_ZIP" ]; then
@@ -109,7 +121,8 @@ jobs:
               --notes "基金分析综合报告 - ${TODAY}
             包含：
             - 宽基指数EMA趋势分析
-            - 基金综合分析（趋势+技术信号合并）" \
+            - 基金综合分析（趋势+技术信号+买卖点策略）
+            - 信号明细表格（CSV+Excel）" \
               "$ZIP_NAME"
 
             DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/tag/${TAG_NAME}"
